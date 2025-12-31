@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>思い出のクイズ - 完全統合版</title>
+    <style>
+        :root {
+            --sepia-dark: #120a06;
+            --sepia-light: #f1e3c7;
+            --accent: #ffe7a6;
+            --gold: #bfa57d;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100%; width: 100%;
+            background: var(--sepia-dark);
+            color: var(--sepia-light);
+            font-family: 'Hiragino Mincho ProN', 'serif';
+            display: flex; justify-content: center; align-items: center;
+            overflow-x: hidden;
+        }
+
+        #start-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--sepia-dark); z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer;
+        }
+
+        .section {
+            display: none; text-align: center; width: 100%; height: 100%;
+            max-width: 1200px; padding: 2vh 2vw; box-sizing: border-box;
+        }
+        .active { display: flex; flex-direction: column; justify-content: center; align-items: center; animation: fadeIn .6s forwards; }
+
+        h1 { font-size: 7.5vw; margin: 0 0 2vh; }
+        h2 { font-size: 6.5vw; }
+        p, textarea { font-size: 4.8vw; }
+        .question-text { font-size: 5.2vw; line-height: 1.6; margin-bottom: 4vh; }
+        .question-num { font-size: 5.2vw; color: var(--accent); margin-bottom: 2vh; }
+
+        .submit-btn, .option-btn {
+            font-size: 5.0vw; padding: 2vh 3vw; border-radius: 18px;
+            border: 3px solid var(--sepia-light); background: rgba(0,0,0,.2);
+            color: var(--sepia-light); cursor: pointer; margin: 1vh 0.5vw;
+            width: 90%; max-width: 900px; font-family: inherit; transition: 0.3s;
+        }
+        .option-btn:hover, .submit-btn:hover { background: var(--sepia-light); color: var(--sepia-dark); }
+
+        /* 修正：ボタンが中央に並ぶように調整 */
+        #options-area { 
+            display: flex; flex-direction: column; align-items: center; 
+            gap: 1.5vh; width: 100%; 
+        }
+
+        #answer-input, #author-input {
+            width: 95%; font-size: 5.2vw; padding: 1.5vh 1vw; text-align: center;
+            border: none; border-bottom: 4px solid var(--sepia-light);
+            background: transparent; color: var(--sepia-light); outline: none; font-family: inherit;
+        }
+
+        .comment-box {
+            background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 15px;
+            text-align: left; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);
+            font-size: 5.2vw; line-height: 1.4;
+        }
+        .edit-btn {
+            background: none; border: 1px solid var(--accent); color: var(--accent);
+            padding: 5px 15px; border-radius: 5px; cursor: pointer; font-size: 0.8em; margin-top: 10px;
+        }
+
+        .ending-scroll { height: 400px; overflow: hidden; position: relative; width: 100%; }
+        .scroll-content { 
+            position: absolute; width: 100%; 
+            animation: scrollUp 20s linear forwards; 
+            font-size: 5vw; line-height: 3.0; 
+        }
+        .fin-text { 
+            font-size: 15vw; letter-spacing: 2.5rem; opacity: 0; 
+            animation: fadeIn 6s forwards 18s, fadeOut 4s forwards 28s; 
+        }
+
+        .opening-title {
+            font-size: 12vw; letter-spacing: 1.0rem; color: #d4af37;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8), 0 0 20px rgba(255, 231, 166, 0.5);
+            filter: blur(5px); animation: blurIn 3s forwards; font-weight: bold;
+        }
+
+        @keyframes blurIn { 0% { filter: blur(20px); opacity: 0; } 100% { filter: blur(0px); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        @keyframes scrollUp { 
+            0% { transform: translateY(10%); opacity: 1; } 
+            90% { opacity: 1; } 
+            100% { transform: translateY(-110%); opacity: 0; } 
+        }
+
+        .flash { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; opacity: 0; z-index: 100; pointer-events: none; }
+        .flash-hit { animation: flashAnim 0.6s ease-out; }
+        @keyframes flashAnim { 0% { opacity: 0; } 50% { opacity: 0.4; } 100% { opacity: 0; } }
+
+        #scene-editor { justify-content: flex-start; overflow-y: auto; }
+        .editor-header-fixed {
+            position: sticky; top: 0; left: 0; width: 100%; background: var(--sepia-dark); z-index: 1000; padding-bottom: 15px; border-bottom: 2px solid var(--gold);
+        }
+        .editor-card { 
+            background: rgba(255, 255, 255, 0.05); padding: 20px; border-radius: 15px; border: 1px solid var(--gold); width: 95%; max-width: 600px; margin: 10px auto;
+        }
+        .editor-label { color: var(--accent); font-size: 5.5vw; font-weight: bold; display: block; margin-bottom: 10px; text-align: left; }
+        .quiz-item-card { 
+            background: rgba(255,255,255,0.1); padding: 15px; margin: 10px auto; border-radius: 8px; font-size: 4vw; display: flex; justify-content: space-between; align-items: center; width: 90%; max-width: 600px;
+        }
+        #q-type, #q-options, #q-correct, #q-answer-text, #scene-editor textarea {
+            width: 100%; font-size: 4.5vw; padding: 12px; background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--gold); border-radius: 8px; box-sizing: border-box; font-family: inherit; display: block; margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-overlay" onclick="initApp()">
+        <div style="font-size: 6vw; color: var(--gold); border: 2px solid var(--gold); padding: 20px; border-radius: 50px;">
+            Tap to Start
+        </div>
+    </div>
+
+    <audio id="bgm" src="melody.mp3" loop></audio>
+
+    <div class="flash" id="flash"></div>
+
+    <div id="scene-opening" class="section">
+        <div style="font-size: 10vw; color: var(--gold); margin-bottom: 15px;">Memory Quiz</div>
+        <div class="opening-title">思い出のクイズ</div>
+    </div>
+
+    <div id="scene-select" class="section">
+        <h1 id="select-title">思い出クイズ</h1>
+        <p id="select-guide">問題を選んでください</p>
+        <div id="question-list" style="width: 100%; display: flex; flex-direction: column; align-items: center;"></div>
+        <div id="ending-trigger" style="display:none; margin-top: 4vh; width: 100%; text-align: center;">
+            <button class="submit-btn" style="border-color: var(--gold); color: var(--gold); background: rgba(191,165,125,0.1); width: 90%;" onclick="startEnding()">
+                ✨ 思い出を完結させる
+            </button>
+        </div>
+        <button class="submit-btn" style="margin-top: 5vh; font-size: 5vw; opacity: 0.8; border-color: var(--gold);" onclick="show('scene-editor');">
+            ⚙ 問題を編集する
+        </button>
+    </div>
+
+    <div id="scene-editor" class="section">
+        <div class="editor-header-fixed">
+            <h2 style="color: var(--gold); margin: 20px 0 10px 0;">問題を編集</h2>
+            <div class="editor-card">
+                <div style="margin-bottom: 15px;">
+                    <label class="editor-label">【出題形式】</label>
+                    <select id="q-type" onchange="toggleType()">
+                        <option value="choice">選択肢問題</option>
+                        <option value="input">記述問題</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label class="editor-label">【問題文】</label>
+                    <textarea id="q-text" rows="2" placeholder="例：初めて旅行に行った場所は？"></textarea>
+                </div>
+                <div id="choice-inputs">
+                    <label class="editor-label">【選択肢と正解】</label>
+                    <input type="text" id="q-options" placeholder="選択肢をカンマ(,)区切りで入力">
+                    <div style="margin-top:10px; text-align: left; font-size: 4.5vw; color: var(--accent);">
+                        正解番号 (左から数えて): <input type="number" id="q-correct" min="1" value="1" style="width: 80px; text-align: center; display: inline-block; background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--gold); border-radius: 8px;">
+                    </div>
+                </div>
+                <div id="text-inputs" style="display:none">
+                    <label class="editor-label">【正解の言葉】</label>
+                    <input type="text" id="q-answer-text" placeholder="正解を入力">
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button class="submit-btn" style="flex: 2; margin: 0; font-size: 4.5vw;" onclick="addQuestion()">＋ 追加</button>
+                    <button class="submit-btn" style="flex: 1; margin: 0; font-size: 4.5vw; border-color: var(--gold);" onclick="show('scene-select')">戻る</button>
+                </div>
+            </div>
+        </div>
+        <div id="question-list-admin" style="width: 100%; padding-top: 10px; padding-bottom: 50px;"></div>
+    </div>
+
+    <div id="scene-quiz" class="section">
+        <div id="question-num" class="question-num"></div>
+        <div id="question-text" class="question-text"></div>
+        <div id="options-area"></div>
+        <div id="input-area" style="display:none; width: 100%;">
+            <input id="answer-input" placeholder="答えを入力…">
+            <button class="submit-btn" style="margin-top: 20px;" onclick="checkTextAnswer()">回答する</button>
+        </div>
+        <button class="submit-btn" style="font-size: 4vw; margin-top: 3vh; opacity: 0.7;" onclick="openCommentsOnly(currentQuestion)">投稿だけ見る</button>
+    </div>
+
+    <div id="scene-comment" class="section" style="justify-content: flex-start; overflow-y: auto;">
+        <h2 id="judge-text">結果</h2>
+        <div id="comment-list" style="width: 90%;"></div>
+        <div class="comment-box" style="width: 90%; border: 2px solid var(--accent); box-sizing: border-box;">
+            <p>投稿者名</p>
+            <input id="author-input" placeholder="お名前">
+            <p style="margin-top:2vh;">コメント</p>
+            <textarea id="comment-input" style="width:100%; height:15vh; background: rgba(255,255,255,0.05); color: white; border: 1px solid var(--gold); border-radius: 8px;"></textarea>
+            <button class="submit-btn" onclick="postComment()">投稿する</button>
+        </div>
+        <button class="submit-btn" onclick="show('scene-select')">戻る</button>
+    </div>
+
+    <div id="scene-ending" class="section">
+        <div class="ending-scroll">
+            <div class="scroll-content">
+                <p>あの日、あの時、あの場所で。</p><br>
+                <p>積み重ねてきた大切な時間。</p><br>
+                <p>一つ一つの記憶が、</p><br>
+                <p>今の私たちを作っています。</p><br>
+                <p>忘れていたことも、</p><br>
+                <p>覚えていることも、</p><br>
+                <p>すべてがかけがえのない宝物。</p><br>
+                <p>共に歩んでくれて、ありがとう。</p>
+            </div>
+        </div>
+        <div class="fin-text">一関一高　G組　1990年　卒業生</div>
+    </div>
+
+    <script>
+        // 固定の問題1
+        const FIXED_Q1 = {type:"choice", question:"自由に投稿してね✨️", options:["投稿する"], answer:-1};
+
+        let rawData = JSON.parse(localStorage.getItem("memory_quiz_v2")) || [];
+        if (rawData.length === 0) {
+            rawData = [FIXED_Q1];
+        } else {
+            rawData[0] = FIXED_Q1;
+        }
+        let quizData = rawData;
+
+        let currentQuestion = 0;
+
+        function initApp() {
+            const bgm = document.getElementById('bgm');
+            bgm.play().catch(e => console.log("Audio play blocked"));
+            document.getElementById('start-overlay').style.display = 'none';
+            show('scene-opening');
+            setTimeout(() => show('scene-select'), 5000);
+        }
+
+        function show(id) {
+            document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+            const target = document.getElementById(id);
+            if(target) {
+                target.classList.add("active");
+                if(id === 'scene-select') buildQuestionList();
+                if(id === 'scene-editor') renderAdminList();
+            }
+        }
+
+        function buildQuestionList() {
+            const list = document.getElementById("question-list");
+            list.innerHTML = "";
+            let correctCount = 0;
+            quizData.forEach((q, i) => {
+                const isCleared = localStorage.getItem("q_cleared_" + i) === "true";
+                if(isCleared) correctCount++;
+                const btn = document.createElement("button");
+                btn.className = "submit-btn";
+                const count = localStorage.getItem("new_count_" + i) || 0;
+                btn.innerText = `第${i+1}問: ${q.question}${isCleared ? " ✅" : ""}${count > 0 ? " 🔔"+count : ""}`;
+                btn.onclick = () => {
+                    currentQuestion = i;
+                    localStorage.removeItem("new_count_" + i);
+                    loadQuestion();
+                    show('scene-quiz');
+                };
+                list.appendChild(btn);
+            });
+            document.getElementById("ending-trigger").style.display = (correctCount === quizData.length && quizData.length > 0) ? "block" : "none";
+        }
+
+        // 修正：選択肢の数に応じてボタンを動的に生成する関数
+        function loadQuestion() {
+            const d = quizData[currentQuestion];
+            document.getElementById("question-num").innerText = `第${currentQuestion+1}問`;
+            document.getElementById("question-text").innerText = d.question;
+            
+            const optionsArea = document.getElementById("options-area");
+            const inputArea = document.getElementById("input-area");
+            optionsArea.innerHTML = ""; // 以前のボタンをクリア
+
+            if(d.type === "choice") {
+                optionsArea.style.display = "flex";
+                inputArea.style.display = "none";
+                
+                // 選択肢配列の数だけボタンをループ生成
+                d.options.forEach((optText, index) => {
+                    const btn = document.createElement("button");
+                    btn.className = "option-btn";
+                    btn.innerText = optText;
+                    btn.onclick = () => checkAnswer(index);
+                    optionsArea.appendChild(btn);
+                });
+            } else {
+                optionsArea.style.display = "none";
+                inputArea.style.display = "block";
+                document.getElementById("answer-input").value = "";
+            }
+        }
+
+        function checkAnswer(i) {
+            let ok = (currentQuestion === 0) ? true : (i === quizData[currentQuestion].answer);
+            if(ok) { localStorage.setItem("q_cleared_" + currentQuestion, "true"); triggerFlash(); }
+            showResult(ok);
+        }
+
+        function checkTextAnswer() {
+            let ok = (currentQuestion === 0) ? true : (document.getElementById("answer-input").value.trim() === quizData[currentQuestion].answer);
+            if(ok) { localStorage.setItem("q_cleared_" + currentQuestion, "true"); triggerFlash(); }
+            showResult(ok);
+        }
+
+        function showResult(ok) {
+            document.getElementById("judge-text").innerText = ok ? "正解！" : "残念…";
+            loadComments();
+            show('scene-comment');
+        }
+
+        function openCommentsOnly(i) {
+            currentQuestion = i;
+            document.getElementById("judge-text").innerText = "投稿一覧";
+            loadComments();
+            show('scene-comment');
+        }
+
+        function loadComments() {
+            const list = document.getElementById("comment-list");
+            list.innerHTML = "";
+            const comments = JSON.parse(localStorage.getItem("comments_" + currentQuestion) || "[]");
+            comments.forEach((c, idx) => {
+                const box = document.createElement("div");
+                box.className = "comment-box";
+                if(c.isMy) box.style.background = "rgba(255,231,166,0.1)";
+                box.innerHTML = `<strong>👤 ${c.name}</strong><br><p>${c.text}</p>`;
+                if(c.isMy) {
+                    const eb = document.createElement("button");
+                    eb.innerText = "✎ 編集"; eb.className = "edit-btn";
+                    eb.onclick = () => {
+                        const nt = prompt("編集:", c.text);
+                        if(nt) { comments[idx].text = nt; localStorage.setItem("comments_"+currentQuestion, JSON.stringify(comments)); loadComments(); }
+                    };
+                    box.appendChild(eb);
+                }
+                list.appendChild(box);
+            });
+        }
+
+        function postComment() {
+            const name = document.getElementById("author-input").value.trim();
+            const text = document.getElementById("comment-input").value.trim();
+            if(!name || !text) return alert("入力してください");
+            const comments = JSON.parse(localStorage.getItem("comments_" + currentQuestion) || "[]");
+            comments.push({ name, text, isMy: true });
+            localStorage.setItem("comments_" + currentQuestion, JSON.stringify(comments));
+            localStorage.setItem("new_count_" + currentQuestion, parseInt(localStorage.getItem("new_count_"+currentQuestion)||0)+1);
+            document.getElementById("comment-input").value = "";
+            loadComments();
+        }
+
+        function toggleType() {
+            const t = document.getElementById('q-type').value;
+            document.getElementById('choice-inputs').style.display = t === 'choice' ? 'block' : 'none';
+            document.getElementById('text-inputs').style.display = t === 'input' ? 'block' : 'none';
+        }
+
+        function addQuestion() {
+            const type = document.getElementById('q-type').value;
+            const text = document.getElementById('q-text').value.trim();
+            if(!text) return alert("問題文を入力してください");
+            let nq = { type, question: text };
+            if(type === 'choice') {
+                nq.options = document.getElementById('q-options').value.split(',').map(s => s.trim()).filter(s => s !== "");
+                nq.answer = parseInt(document.getElementById('q-correct').value) - 1;
+            } else {
+                nq.answer = document.getElementById('q-answer-text').value.trim();
+            }
+            quizData.push(nq);
+            saveData();
+            renderAdminList();
+            document.getElementById('q-text').value = "";
+            document.getElementById('q-options').value = "";
+        }
+
+        function renderAdminList() {
+            const list = document.getElementById('question-list-admin');
+            list.innerHTML = quizData.map((q, i) => `
+                <div class="quiz-item-card">
+                    <span style="text-align:left; flex:1;">${i+1}. ${q.question}</span>
+                    ${i === 0 ? '<span style="color:var(--accent); font-size: 3.5vw;">[システム固定]</span>' : `<span style="color:#ff6b6b; cursor:pointer; font-weight:bold; padding: 10px;" onclick="deleteQ(${i})">削除</span>`}
+                </div>
+            `).join('') + `<div style="height:50px;"></div>`;
+        }
+
+        function deleteQ(i) {
+            if(i === 0) return alert("問題1は削除できません。");
+            if(confirm("この問題を削除しますか？")) { quizData.splice(i, 1); saveData(); renderAdminList(); }
+        }
+
+        function saveData() { localStorage.setItem("memory_quiz_v2", JSON.stringify(quizData)); }
+
+        function triggerFlash() {
+            const f = document.getElementById('flash');
+            f.classList.remove('flash-hit'); void f.offsetWidth; f.classList.add('flash-hit');
+        }
+
+        function startEnding() {
+            show('scene-ending');
+            setTimeout(() => { location.reload(); }, 35000);
+        }
+    </script>
+</body>
+</html>

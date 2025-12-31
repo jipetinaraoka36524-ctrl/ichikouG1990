@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+<title>AR Memory Orbit — Ichinoseki 1990</title>
+<style>
+    html,body{ margin:0; padding:0; height:100%; overflow:hidden; background:#000; font-family:system-ui; }
+    #app{ position:relative; width:100%; height:100vh; overflow:hidden; }
+    #cam{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
+    #cv{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="app">
+    <video id="cam" autoplay playsinline muted></video>
+    <canvas id="cv"></canvas>
+    <audio id="bgm" src="kouka.mp3" preload="auto"></audio> 
+</div>
+
+<script>
+/* =======================
+   設定
+======================= */
+const CONFIG = {
+    CAMERA: true,
+    GYRO: true,
+    SCROLL_TEXT: true,
+    FLOATING_OBJECTS: true,
+    LYRICS: true,
+    BGM: true,
+    SCROLL_FONT_SIZE: 56,
+    LYRICS_FONT_SIZE: 96,
+    OBJECT_MOTION_MODE: "BOUNCE_INNER",
+    OBJECT_SIZE_FIXED: true,
+    HAT_SPEED_MULT: 2.0
+};
+
+/* =======================
+   画像
+======================= */
+const Assets = {
+    hat: new Image(), gmark: new Image(), bg: new Image(),
+    init() {
+        this.hat.src = "hat.png";
+        this.gmark.src = "gmark.png";
+        this.bg.src = "bg.png";
+    }
+};
+
+/* =======================
+   BGM & 歌詞
+======================= */
+const BGMPlayer = {
+    el: document.getElementById("bgm"),
+    isStarted: false,
+    currentStanza: 0,
+    timings: [
+        {start:0,end:2},{start:2,end:6.5},{start:7,end:10.5},
+        {start:11.5,end:16},{start:16.5,end:20.5},{start:21,end:25.5},{start:26,end:30}
+    ],
+    stanzas: [
+        ["【1番】","岩手磐井の一関","名も高崎の城の跡","新たに結構荘厳の","一宇の校舎成るをつげ","中学校と生まれしは","明治三十有一年"],
+        ["【2番】","六百の健児集ひ来て","温故知新の智を磨き","切磋琢磨の徳を積み","不屈不撓の勇を練り","東北の野に花咲かせ","実を結ばすや五星霜"],
+        ["【3番】","学びの窓ゆ眺むれば","雪降り積もる須川岳","蛍飛び交ふ磐井川","我が関高の学生よ","夏と冬とのけじめなく","蛍雪の功積めや積め"]
+    ],
+    init() {
+        this.el.addEventListener("ended", () => {
+            this.currentStanza = (this.currentStanza + 1) % 3;
+            this.el.currentTime = 0;
+            this.el.play();
+        });
+    },
+    async start() {
+        if (!CONFIG.BGM) return;
+        try {
+            this.el.load();
+            await this.el.play();
+            this.isStarted = true;
+        } catch(e){}
+    },
+    getCurrentLine() {
+        if (!CONFIG.LYRICS) return null;
+        if (!this.isStarted && this.el.paused) return null;
+        const t = this.el.currentTime;
+        const idx = this.timings.findIndex(v => t >= v.start && t < v.end);
+        return idx !== -1 ? this.stanzas[this.currentStanza][idx] : null;
+    }
+};
+
+/* =======================
+   スクロール文字
+======================= */
+const Scroller = {
+    text: "一関一高 1990年卒業",
+    x: -1, mode: "TOP", speed: 2.0,
+    draw(ctx, w, h) {
+        if (!CONFIG.SCROLL_TEXT) return;
+
+        ctx.save();
+        ctx.font = `bold ${CONFIG.SCROLL_FONT_SIZE}px 'Hiragino Mincho ProN','MS Mincho',serif`;
+
+        const tw = ctx.measureText(this.text).width;
+        if (this.x === -1) this.x = w;
+
+        this.x -= this.speed;
+        if (this.x < -tw) {
+            this.x = w;
+            this.mode = (this.mode === "TOP") ? "BOTTOM" : "TOP";
+        }
+
+        const y = (this.mode === "TOP")
+            ? CONFIG.SCROLL_FONT_SIZE + 20
+            : (h - 160);
+
+        const g = ctx.createLinearGradient(0, y - 20, 0, y + 10);
+        g.addColorStop(0, "#D4AF37");
+        g.addColorStop(0.5, "#FFFACD");
+        g.addColorStop(1, "#8B7500");
+
+        ctx.shadowColor = "rgba(0,0,0,0.8)";
+        ctx.shadowBlur = 4;
+        ctx.fillStyle = g;
+        ctx.fillText(this.text, this.x, y);
+
+        ctx.restore();
+    }
+};
+
+/* =======================
+   跳ね返り＋滑らか表示
+======================= */
+const Orbit = {
+    bgTarget:{x:0,y:0,scale:0.25,alpha:0.8},
+    bgCurrent:{x:0,y:0,scale:1.0,alpha:0.1},
+
+    bouncePos:{
+        g:{x:0,y:0,vx:2,vy:2},
+        h:{x:0,y:0,vx:-2*CONFIG.HAT_SPEED_MULT,vy:1.5*CONFIG.HAT_SPEED_MULT}
+    },
+
+    /* ★ 滑らかさ専用 表示用座標 */
+    smoothed:{
+        g:{x:0,y:0},
+        h:{x:0,y:0}
+    },
+    SMOOTH_STRENGTH:0.18,
+
+    ripples:[],
+    nextRippleTime:0,
+    
+    /* ★ 追加: 背景画像がタップされたか判定する関数 */
+    isBgTapped(tx, ty) {
+        const w = window.innerWidth;
+        // Renderer.draw 内の計算式と同じものを使用
+        const cw = 400 * this.bgCurrent.scale * (w / 100);
+        const ch = 260 * this.bgCurrent.scale * (w / 100);
+        // 楕円（または矩形）の範囲内にあるかチェック
+        return (
+            tx >= this.bgCurrent.x - cw / 2 &&
+            tx <= this.bgCurrent.x + cw / 2 &&
+            ty >= this.bgCurrent.y - ch / 2 &&
+            ty <= this.bgCurrent.y + ch / 2
+        );
+    },
+    
+
+    init(w,h){
+        this.bgTarget.x=w/2;
+        this.bgTarget.y=h/3;
+
+        this.bouncePos.g.x=w/2;
+        this.bouncePos.g.y=h/4;
+
+        this.bouncePos.h.x=w/2;
+        this.bouncePos.h.y=h/4+50;
+    },
+
+    update(w,h,t,dt){
+
+        /* ---- 歌詞の下端計算 ---- */
+        const lyricsY = CONFIG.SCROLL_FONT_SIZE + CONFIG.LYRICS_FONT_SIZE + 40;
+
+        let minY = lyricsY + 10;
+        let maxY = h/2;
+        if(minY > maxY){ const tmp=minY; minY=maxY; maxY=tmp; }
+
+        const HALF_G = 90;
+        const HALF_H = 70;
+
+        /* ---- 背景アニメ ---- */
+        this.bgCurrent.x += (this.bgTarget.x - this.bgCurrent.x)*0.05;
+        this.bgCurrent.y += (this.bgTarget.y - this.bgCurrent.y)*0.05;
+        this.bgCurrent.scale += (this.bgTarget.scale - this.bgCurrent.scale)*0.05;
+        this.bgCurrent.alpha += (this.bgTarget.alpha - this.bgCurrent.alpha)*0.05;
+
+        /* ---- 跳ね返り移動 ---- */
+        ["g","h"].forEach(key=>{
+            const p=this.bouncePos[key];
+            p.x += p.vx*dt*60;
+            p.y += p.vy*dt*60;
+
+            const margin=(key==="g")?HALF_G:HALF_H;
+
+            const minX=0+margin;
+            const maxX=w-margin;
+            const minY2=minY+margin;
+            const maxY2=maxY-margin;
+
+            if(p.x<minX){ p.x=minX; p.vx=Math.abs(p.vx); }
+            if(p.x>maxX){ p.x=maxX; p.vx=-Math.abs(p.vx); }
+            if(p.y<minY2){ p.y=minY2; p.vy=Math.abs(p.vy); }
+            if(p.y>maxY2){ p.y=maxY2; p.vy=-Math.abs(p.vy); }
+        });
+
+        /* ---- ★ 滑らかさ復活：慣性スムージング ---- */
+        ["g","h"].forEach(key=>{
+            const p=this.bouncePos[key];
+            const s=this.smoothed[key];
+
+            if(s.x===0 && s.y===0){
+                s.x=p.x;
+                s.y=p.y;
+            }
+
+            s.x += (p.x - s.x) * this.SMOOTH_STRENGTH;
+            s.y += (p.y - s.y) * this.SMOOTH_STRENGTH;
+        });
+
+        /* ---- 波紋発生 ---- */
+        const dx=this.bouncePos.g.x-this.bouncePos.h.x;
+        const dy=this.bouncePos.g.y-this.bouncePos.h.y;
+        const dist=Math.hypot(dx,dy);
+
+        if(dist<120 && t>this.nextRippleTime){
+            this.nextRippleTime=t+0.25;
+            this.ripples.push({
+                x:(this.bouncePos.g.x+this.bouncePos.h.x)/2,
+                y:(this.bouncePos.g.y+this.bouncePos.h.y)/2,
+                r:0,a:1
+            });
+        }
+
+        /* ---- 波紋拡大 ---- */
+        this.ripples.forEach((r,i)=>{
+            r.r+=3.2*dt*60;
+            r.a*=0.96;
+            if(r.a<0.02) this.ripples.splice(i,1);
+        });
+    }
+};
+
+/* =======================
+   Renderer
+======================= */
+const Renderer = {
+    cv: document.getElementById("cv"),
+    ctx: document.getElementById("cv").getContext("2d"),
+    t:0,lastTime:performance.now(),
+
+    init(){
+        this.resize();
+        window.addEventListener("resize",()=>this.resize());
+    },
+
+    resize(){
+        this.cv.width = window.innerWidth*devicePixelRatio;
+        this.cv.height = window.innerHeight*devicePixelRatio;
+        this.ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+        Orbit.init(window.innerWidth,window.innerHeight);
+    },
+
+    draw(){
+        const w=window.innerWidth;
+        const h=window.innerHeight;
+
+        const now=performance.now();
+        const dt=(now-this.lastTime)/1000;
+        this.lastTime=now;
+        this.t+=dt;
+
+        this.ctx.clearRect(0,0,w,h);
+
+        Orbit.update(w,h,this.t,dt);
+
+        /* ---- 背景 bg ---- */
+        if(Assets.bg.complete){
+            this.ctx.save();
+            this.ctx.globalAlpha=Orbit.bgCurrent.alpha;
+
+            const cw=400*Orbit.bgCurrent.scale*(w/100);
+            const ch=260*Orbit.bgCurrent.scale*(w/100);
+
+            this.ctx.beginPath();
+            this.ctx.ellipse(Orbit.bgCurrent.x,Orbit.bgCurrent.y,cw/2,ch/2,0,0,Math.PI*2);
+            this.ctx.clip();
+
+            this.ctx.drawImage(
+                Assets.bg,
+                Orbit.bgCurrent.x-cw/2,
+                Orbit.bgCurrent.y-ch/2,
+                cw,ch
+            );
+
+            this.ctx.restore();
+        }
+
+        /* ---- 波紋 ---- */
+        Orbit.ripples.forEach(r=>{
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
+            this.ctx.lineWidth=3;
+            this.ctx.strokeStyle=`rgba(255,255,200,${r.a})`;
+            this.ctx.shadowColor=`rgba(255,255,0,${r.a})`;
+            this.ctx.shadowBlur=15;
+            this.ctx.stroke();
+            this.ctx.restore();
+        });
+
+        /* ---- スクロール文字 ---- */
+        Scroller.draw(this.ctx,w,h);
+
+        /* ---- 歌詞 ---- */
+        const line=BGMPlayer.getCurrentLine();
+        if(line){
+            this.ctx.save();
+            this.ctx.font=`bold ${CONFIG.LYRICS_FONT_SIZE}px system-ui`;
+            this.ctx.textAlign="center";
+            this.ctx.shadowColor="rgba(0,0,0,0.8)";
+            this.ctx.shadowBlur=10;
+            this.ctx.fillStyle=line.startsWith("【")?"#ff6464":"#b4ffb4";
+            this.ctx.fillText(line,w/2,CONFIG.SCROLL_FONT_SIZE+CONFIG.LYRICS_FONT_SIZE+40);
+            this.ctx.restore();
+        }
+
+        /* ---- 学帽・校章（★滑らか表示座標） ---- */
+        if(CONFIG.FLOATING_OBJECTS){
+            const s=CONFIG.OBJECT_SIZE_FIXED?1.5:1.0;
+
+            if(Assets.gmark.complete){
+                this.ctx.save();
+                this.ctx.translate(Orbit.smoothed.g.x,Orbit.smoothed.g.y);
+                this.ctx.scale(s,s);
+                this.ctx.drawImage(Assets.gmark,-90,-90,180,180);
+                this.ctx.restore();
+            }
+
+            if(Assets.hat.complete){
+                this.ctx.save();
+                this.ctx.translate(Orbit.smoothed.h.x,Orbit.smoothed.h.y);
+                this.ctx.scale(s,s);
+                this.ctx.drawImage(Assets.hat,-70,-50,140,100);
+                this.ctx.restore();
+            }
+        }
+
+        requestAnimationFrame(()=>this.draw());
+    }
+};
+
+/* =======================
+   Camera
+======================= */
+async function startCamera(){
+    if(!CONFIG.CAMERA) return;
+    const v=document.getElementById("cam");
+    if(v.srcObject) return;
+
+    try{
+        const s=await navigator.mediaDevices.getUserMedia({
+            video:{facingMode:"environment"},
+            audio:false
+        });
+        v.srcObject=s;
+        await v.play();
+    }catch(e){}
+}
+
+/* =======================
+   起動
+======================= */
+window.onload=()=>{
+    Assets.init();
+    Renderer.init();
+    BGMPlayer.init();
+
+    document.addEventListener("click", async (e) => {
+        // 1. 初回クリック時のカメラ・BGM開始（既存機能）
+        if (!BGMPlayer.isStarted) {
+            await startCamera();
+            await BGMPlayer.start();
+        }
+
+        // 2. ★ 追加: 背景タップ判定による遷移
+        // キャンバス上の座標を取得
+        const rect = Renderer.cv.getBoundingClientRect();
+        const touchX = e.clientX - rect.left;
+        const touchY = e.clientY - rect.top;
+
+        if (Orbit.isBgTapped(touchX, touchY)) {
+            // 背景画像がタップされたら遷移
+            window.location.href = "question.html";
+        }
+    });
+    Renderer.draw();
+};
+</script>
+</body>
+</html>
