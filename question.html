@@ -490,15 +490,15 @@ db.collection("posts")
 
 <!-- ✍ 投稿フォーム -->
 <div style="padding:12px;">
-  <textarea id="postText" rows="4" style="width:100%;" placeholder="思い出や投稿を書いてね"></textarea>
-  <button onclick="sendPost()" style="margin-top:8px;width:100%;padding:10px;">
+  <textarea id="postText" rows="4" style="width:100%; display:none;" placeholder="思い出や投稿を書いてね"></textarea>
+  <button onclick="sendPost()" style="margin-top:8px;width:100%;padding:10px; display:none;">
     ✨ 投稿する
   </button>
 </div>
 
 <!-- 📃 投稿一覧 -->
 <h3 style="padding-left:12px;">みんなの投稿</h3>
-<div id="postList" style="padding:12px;"></div>
+<div id="postList" style="padding:12px; display:none;"></div>
 
 <script>
 function sendPost() {
