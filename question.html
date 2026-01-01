@@ -115,6 +115,21 @@
             width: 100%; font-size: 4.5vw; padding: 12px; background: rgba(255,255,255,0.1); color: white; border: 1px solid var(--gold); border-radius: 8px; box-sizing: border-box; font-family: inherit; display: block; margin-bottom: 10px;
         }
     </style>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+　　 <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<script>
+    const firebaseConfig = {
+  apiKey: "AIzaSyDNoN8npk0Ra6EMm75eZF4JA3dHaEXz5pI",
+  authDomain: "ggroup-20e90.firebaseapp.com",
+  projectId: "ggroup-20e90",
+  storageBucket: "ggroup-20e90.firebasestorage.app",
+  messagingSenderId: "211079192422",
+  appId: "1:211079192422:web:7989a86aaeff7c972272a7"
+};
+    firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+</script>
+
 </head>
 <body>
 
@@ -484,5 +499,34 @@ db.collection("posts")
 <!-- 📃 投稿一覧 -->
 <h3 style="padding-left:12px;">みんなの投稿</h3>
 <div id="postList" style="padding:12px;"></div>
+
+<script>
+function sendPost() {
+  const text = document.getElementById("postText").value;
+  if (!text) return;
+
+  db.collection("posts").add({
+    text: text,
+    created: firebase.firestore.Timestamp.now()
+  });
+
+  document.getElementById("postText").value = "";
+}
+
+db.collection("posts")
+  .orderBy("created", "desc")
+  .onSnapshot((snapshot) => {
+    const list = document.getElementById("postList");
+    list.innerHTML = "";
+
+    snapshot.forEach(doc => {
+      const d = doc.data();
+      const div = document.createElement("div");
+      div.textContent = d.text;
+      list.appendChild(div);
+    });
+  });
+</script>
+    
 </body>
 </html>
